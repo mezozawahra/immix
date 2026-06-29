@@ -4,36 +4,20 @@
 #include "Block.h"
 #include <stdio.h>
 #include <memory.h>
+#include "concurrent/MutatorSync.h"
 
 BlockHeader *Allocator_getNextBlock(Allocator *allocator);
 bool Allocator_getNextLine(Allocator *allocator);
 
 /**
- *
- * Allocates the Allocator and initialises it's fields
- *
- * @param heapStart
- * @param blockCount Initial number of blocks in the heap
- * @return
+ * Allocates the per-thread Allocator and primes its cursors from the
+ * shared GlobalBlockAllocator. Called once per mutator thread
+ * (ImmixGC_RegisterThread) and again, implicitly via Allocator_InitCursors,
+ * for every registered thread after each collection.
  */
-Allocator *Allocator_Create(word_t *heapStart, int blockCount) {
+Allocator *Allocator_Create(GlobalBlockAllocator *globalAllocator) {
     Allocator *allocator = malloc(sizeof(Allocator));
-    allocator->heapStart = heapStart;
-
-    BlockList_Init(&allocator->recycledBlocks, heapStart);
-    BlockList_Init(&allocator->freeBlocks, heapStart);
-
-    // Init the free block list
-    allocator->freeBlocks.first = (BlockHeader *)heapStart;
-    BlockHeader *lastBlockHeader =
-        (BlockHeader *)(heapStart + ((blockCount - 1) * WORDS_IN_BLOCK));
-    allocator->freeBlocks.last = lastBlockHeader;
-    lastBlockHeader->header.nextBlock = LAST_BLOCK;
-
-    // Block stats
-    allocator->blockCount = (uint64_t)blockCount;
-    allocator->freeBlockCount = (uint64_t)blockCount;
-    allocator->recycledBlockCount = 0;
+    allocator->globalAllocator = globalAllocator;
 
     Allocator_InitCursors(allocator);
 
@@ -42,23 +26,17 @@ Allocator *Allocator_Create(word_t *heapStart, int blockCount) {
 
 /**
  * The Allocator needs one free block for overflow allocation and a free or
- * recyclable block for normal allocation.
- *
- * @param allocator
- * @return `true` if there are enough block to initialise the cursors, `false`
- * otherwise.
+ * recyclable block for normal allocation - now checked against the shared
+ * pool, accounting for every currently-registered thread needing the same.
  */
 bool Allocator_CanInitCursors(Allocator *allocator) {
-    return allocator->freeBlockCount >= 2 ||
-           (allocator->freeBlockCount == 1 &&
-            allocator->recycledBlockCount > 0);
+    return GlobalBlockAllocator_CanInitCursors(allocator->globalAllocator,
+                                               MutatorSync_ThreadCount());
 }
 
 /**
- *
- * Used to initialise the cursors of the Allocator after collection
- *
- * @param allocator
+ * Used to initialise the cursors of the Allocator after collection (and,
+ * for a freshly registered thread, for the very first time).
  */
 void Allocator_InitCursors(Allocator *allocator) {
 
@@ -69,11 +47,11 @@ void Allocator_InitCursors(Allocator *allocator) {
 
     Allocator_getNextLine(allocator);
 
-    // Init large cursor
-    assert(!BlockList_IsEmpty(&allocator->freeBlocks));
-
+    // Init large (overflow) cursor - always a fresh, free block, never a
+    // recycled one. See the note on GlobalBlockAllocator_GetFreeBlock.
     BlockHeader *largeHeader =
-        BlockList_RemoveFirstBlock(&allocator->freeBlocks);
+        GlobalBlockAllocator_GetFreeBlock(allocator->globalAllocator);
+    assert(largeHeader != NULL);
     allocator->largeBlock = largeHeader;
     allocator->largeCursor = Block_GetFirstWord(largeHeader);
     allocator->largeLimit = Block_GetBlockEnd(largeHeader);
@@ -83,22 +61,7 @@ void Allocator_InitCursors(Allocator *allocator) {
  * Heuristic that tells if the heap should be grown or not.
  */
 bool Allocator_ShouldGrow(Allocator *allocator) {
-    uint64_t unavailableBlockCount =
-        allocator->blockCount -
-        (allocator->freeBlockCount + allocator->recycledBlockCount);
-
-#ifdef DEBUG_PRINT
-    printf("\n\nBlock count: %llu\n", allocator->blockCount);
-    printf("Unavailable: %llu\n", unavailableBlockCount);
-    printf("Free: %llu\n", allocator->freeBlockCount);
-    printf("Recycled: %llu\n", allocator->recycledBlockCount);
-    fflush(stdout);
-#endif
-
-    return allocator->freeBlockCount < allocator->blockCount / 3 ||
-           4 * unavailableBlockCount > allocator->blockCount ||
-           allocator->freeMemoryAfterCollection * 2 <
-               allocator->blockCount * BLOCK_TOTAL_SIZE;
+    return GlobalBlockAllocator_ShouldGrow(allocator->globalAllocator);
 }
 
 /**
@@ -111,10 +74,11 @@ word_t *Allocator_overflowAllocation(Allocator *allocator, size_t size) {
     word_t *end = (word_t *)((uint8_t *)start + size);
 
     if (end > allocator->largeLimit) {
-        if (BlockList_IsEmpty(&allocator->freeBlocks)) {
+        BlockHeader *block =
+            GlobalBlockAllocator_GetFreeBlock(allocator->globalAllocator);
+        if (block == NULL) {
             return NULL;
         }
-        BlockHeader *block = BlockList_RemoveFirstBlock(&allocator->freeBlocks);
         allocator->largeBlock = block;
         allocator->largeCursor = Block_GetFirstWord(block);
         allocator->largeLimit = Block_GetBlockEnd(block);
@@ -135,7 +99,9 @@ word_t *Allocator_overflowAllocation(Allocator *allocator, size_t size) {
 }
 
 /**
- * Allocation fast path, uses the cursor and limit.
+ * Allocation fast path, uses the cursor and limit. Unchanged from the
+ * single-mutator version: this is the part that must stay lock-free, since
+ * every mutator thread now has its own Allocator and its own cursor/limit.
  */
 INLINE word_t *Allocator_Alloc(Allocator *allocator, size_t size) {
     word_t *start = allocator->cursor;
@@ -246,14 +212,9 @@ bool Allocator_getNextLine(Allocator *allocator) {
 
 /**
  * Returns a block, first from recycled if available, otherwise from
- * chunk_allocator
+ * the shared free-block pool. The lookup itself (and its locking) now
+ * lives entirely in GlobalBlockAllocator_GetBlock.
  */
 BlockHeader *Allocator_getNextBlock(Allocator *allocator) {
-    BlockHeader *block = NULL;
-    if (!BlockList_IsEmpty(&allocator->recycledBlocks)) {
-        block = BlockList_RemoveFirstBlock(&allocator->recycledBlocks);
-    } else if (!BlockList_IsEmpty(&allocator->freeBlocks)) {
-        block = BlockList_RemoveFirstBlock(&allocator->freeBlocks);
-    }
-    return block;
+    return GlobalBlockAllocator_GetBlock(allocator->globalAllocator);
 }
