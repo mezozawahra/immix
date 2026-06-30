@@ -1,10 +1,12 @@
-cmake_minimum_required(VERSION 3.2)
+cmake_minimum_required(VERSION 3.5)
 PROJECT(Immix)
 
+set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(CMAKE_CXX_STANDARD 11)
+find_package(Threads REQUIRED)
 
-add_library(Immix src/
+add_library(Immix
         src/datastructures/Bitmap.c
         src/datastructures/Bitmap.h
         src/datastructures/BlockList.c
@@ -15,8 +17,8 @@ add_library(Immix src/
         src/headers/LineHeader.h
         src/headers/ObjectHeader.h
         src/utils/MathUtils.h
-        src/Allocator.c
-        src/Allocator.h
+        src/ThreadLocalAllocator.c
+        src/ThreadLocalAllocator.h
         src/Block.c
         src/Block.h
         src/Constants.h
@@ -24,6 +26,7 @@ add_library(Immix src/
         src/Heap.c
         src/Heap.h
         src/ImmixGC.c
+        src/ImmixGC.h
         src/LargeAllocator.c
         src/LargeAllocator.h
         src/Line.h
@@ -37,9 +40,15 @@ add_library(Immix src/
         src/StackoverflowHandler.h
         src/StackTrace.h
         src/State.c
-        src/State.h)
+        src/State.h
+        src/concurrent/GlobalBlockAllocator.h
+        src/concurrent/GlobalBlockAllocator.cpp
+        src/concurrent/GlobalLargeAllocator.h
+        src/concurrent/GlobalLargeAllocator.cpp
+        src/concurrent/MutatorSync.h
+        src/concurrent/MutatorSync.cpp
+        src/concurrent/MutatorThread.h
+        src/concurrent/ValStack.h)
 
-set_target_properties(Immix PROPERTIES LINKER_LANGUAGE C)
+target_link_libraries(Immix PRIVATE Threads::Threads)
 set_target_properties(Immix PROPERTIES ARCHIVE_OUTPUT_DIRECTORY build)
-
-

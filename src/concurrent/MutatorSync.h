@@ -15,7 +15,7 @@ extern "C" {
  * (ImmixGC_RegisterThread) is responsible for setting `->allocator` on it
  * right after this returns.
  */
-MutatorThread *MutatorSync_RegisterThread(word_t **stackBottom);
+MutatorThread *MutatorSync_RegisterThread(Val *stackBottom);
 void MutatorSync_UnregisterThread(MutatorThread *self);
 
 uint32_t MutatorSync_ThreadCount(void);
