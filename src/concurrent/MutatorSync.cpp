@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include "MutatorSync.h"
+#include "ValStack.h"
 
 namespace {
 std::mutex g_mutex;
@@ -13,11 +14,11 @@ std::vector<MutatorThread *> g_threads;
 std::atomic<bool> g_stwRequested{false};
 } // namespace
 
-extern "C" MutatorThread *MutatorSync_RegisterThread(word_t **stackBottom) {
+extern "C" MutatorThread *MutatorSync_RegisterThread(Val *stackBottom) {
     auto *thread = (MutatorThread *)malloc(sizeof(MutatorThread));
     thread->allocator = NULL; // set by the caller right after this returns
     thread->stackBottom = stackBottom;
-    thread->parkedStackTop = NULL;
+    thread->parkedStackSize = 0;
     thread->parked = false;
 
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -38,23 +39,18 @@ extern "C" uint32_t MutatorSync_ThreadCount() {
 }
 
 extern "C" void MutatorSync_Poll(MutatorThread *self) {
-    // Fast, unlocked path: no collection pending, nothing to do. This is
-    // the only cost MutatorSync adds to a thread that never collides with
-    // a collection.
     if (!g_stwRequested.load(std::memory_order_acquire)) {
         return;
     }
 
     std::unique_lock<std::mutex> lock(g_mutex);
-    // Re-check under the lock: the request may have already been resolved
-    // between the unlocked check above and acquiring the lock here.
     if (!g_stwRequested.load(std::memory_order_acquire)) {
-        return;
+        return; // resolved between the unlocked check above and this lock
     }
 
-    self->parkedStackTop = (word_t *)&self;
+    self->parkedStackSize = ValStack_CurrentSize();
     self->parked = true;
-    g_cv.notify_all(); // tell a waiting collector "one more parked"
+    g_cv.notify_all();
     g_cv.wait(lock, [] { return !g_stwRequested.load(std::memory_order_acquire); });
     self->parked = false;
 }
@@ -64,10 +60,14 @@ extern "C" bool MutatorSync_BeginCollection(MutatorThread *self) {
     if (!g_stwRequested.compare_exchange_strong(expected, true,
                                                 std::memory_order_acq_rel)) {
         // Someone else is already collecting (or just won the race to
-        // start). Park like a normal mutator and let them drive it.
+        // start) - park like a normal mutator and let them drive it.
         MutatorSync_Poll(self);
         return false;
     }
+
+    // Record our own snapshot the same way a parking thread does -
+    // Marker_markValStacks doesn't special-case the collector at all.
+    self->parkedStackSize = ValStack_CurrentSize();
 
     std::unique_lock<std::mutex> lock(g_mutex);
     g_cv.wait(lock, [&] {

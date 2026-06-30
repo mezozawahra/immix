@@ -2,7 +2,7 @@
 #define IMMIX_HEAP_H
 
 #include "GCTypes.h"
-#include "Allocator.h"
+#include "ThreadLocalAllocator.h"
 #include "LargeAllocator.h"
 #include "datastructures/Stack.h"
 

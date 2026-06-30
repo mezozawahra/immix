@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <setjmp.h>
 #include "Marker.h"
 #include "Object.h"
 #include "Log.h"
@@ -8,16 +7,16 @@
 #include "headers/ObjectHeader.h"
 #include "Block.h"
 #include "StackoverflowHandler.h"
+#include "concurrent/GlobalLargeAllocator.h"
+#include "concurrent/MutatorSync.h"
+#include "concurrent/ValStack.h"
 
 extern word_t *__modules;
 extern int __modules_size;
-extern word_t **__stack_bottom;
 
 #define LAST_FIELD_OFFSET -1
 
 void Marker_Mark(Heap *heap, Stack *stack);
-void StackOverflowHandler_largeHeapOverflowHeapScan(Heap *heap, Stack *stack);
-bool StackOverflowHandler_smallHeapOverflowHeapScan(Heap *heap, Stack *stack);
 
 void Marker_markObject(Heap *heap, Stack *stack, Object *object) {
     assert(!Object_IsMarked(&object->header));
@@ -28,24 +27,23 @@ void Marker_markObject(Heap *heap, Stack *stack, Object *object) {
     }
 }
 
+/**
+ * Kept only for any *other* raw-word root source you still have (e.g.
+ * native/compiled frames holding a bare Any* outside of a Val) - it is no
+ * longer called from anywhere in this file by default. If nothing else
+ * needs conservative resolution, this function and Object_GetObject's
+ * backward/forward line search are dead weight and can be deleted; tell
+ * me and I'll take them out together.
+ */
 void Marker_markConservative(Heap *heap, Stack *stack, word_t *address) {
     assert(Heap_IsWordInHeap(heap, address));
     Object *object = NULL;
     if (Heap_IsWordInSmallHeap(heap, address)) {
         object = Object_GetObject(address);
-        assert(
-            object == NULL ||
-            Line_ContainsObject(&Block_GetBlockHeader((word_t *)object)
-                                     ->lineHeaders[Block_GetLineIndexFromWord(
-                                         Block_GetBlockHeader((word_t *)object),
-                                         (word_t *)object)]));
-#ifdef DEBUG_PRINT
-        if (object == NULL) {
-            printf("Not found: %p\n", address);
-        }
-#endif
     } else {
-        object = Object_GetLargeObject(heap->largeAllocator, address);
+        object = Object_GetLargeObject(
+            GlobalLargeAllocator_Underlying(heap->globalLargeAllocator),
+            address);
     }
 
     if (object != NULL && !Object_IsMarked(&object->header)) {
@@ -58,12 +56,10 @@ void Marker_Mark(Heap *heap, Stack *stack) {
         Object *object = Stack_Pop(stack);
         ObjectHeader *objectHeader = &object->header;
         if (Object_IsObjectArray(objectHeader)) {
-            // remove header and rtti from size
             size_t size =
                 Object_Size(&object->header) - OBJECT_HEADER_SIZE - WORD_SIZE;
             size_t nbWords = size / WORD_SIZE;
             for (int i = 0; i < nbWords; i++) {
-
                 word_t *field = object->fields[i];
                 Object *fieldObject = Object_FromMutatorAddress(field);
                 if (heap_isObjectInHeap(heap, fieldObject) &&
@@ -88,23 +84,54 @@ void Marker_Mark(Heap *heap, Stack *stack) {
     StackOverflowHandler_CheckForOverflow();
 }
 
-void Marker_markProgramStack(Heap *heap, Stack *stack) {
-    // Dumps registers into 'regs' which is on stack
-    jmp_buf regs;
-    setjmp(regs);
-    word_t *dummy;
-
-    word_t **current = &dummy;
-    word_t **stackBottom = __stack_bottom;
-
-    while (current <= stackBottom) {
-
-        word_t *stackObject = (*current) - WORDS_IN_OBJECT_HEADER;
-        if (Heap_IsWordInHeap(heap, stackObject)) {
-            Marker_markConservative(heap, stack, stackObject);
+/**
+ * Precise scan of one thread's Val stack - `size` entries starting at
+ * `stackBottom`. Replaces the old conservative word-by-word scan: every
+ * slot here carries its own `kind` via ValStack_IsReference, so a
+ * reference is resolved with one pointer subtraction
+ * (Object_FromMutatorAddress), never a backward/forward search through
+ * line metadata, and every primitive slot is skipped outright without
+ * even a heap-range check.
+ */
+static void Marker_markValStack(Heap *heap, Stack *stack, Val *stackBottom,
+                                size_t size) {
+    for (size_t i = 0; i < size; i++) {
+        word_t *ref;
+        if (ValStack_IsReference(&stackBottom[i], &ref) &&
+            Heap_IsWordInHeap(heap, ref)) {
+            Object *object = Object_FromMutatorAddress(ref);
+            if (!Object_IsMarked(&object->header)) {
+                Marker_markObject(heap, stack, object);
+            }
         }
-        current += 1;
     }
+}
+
+typedef struct {
+    Heap *heap;
+    Stack *stack;
+} MarkValStackContext;
+
+static void Marker_visitThreadValStack(MutatorThread *thread, void *userData) {
+    MarkValStackContext *ctx = (MarkValStackContext *)userData;
+    Marker_markValStack(ctx->heap, ctx->stack, thread->stackBottom,
+                        thread->parkedStackSize);
+}
+
+/**
+ * Replaces Marker_markProgramStack. Visits every registered thread -
+ * including the collector itself, which recorded its own parkedStackSize
+ * via MutatorSync_BeginCollection right before this runs, so there's no
+ * special case here for "the collector's live stack" the way the old
+ * setjmp/&dummy trick needed. Nothing here is conservative anymore, so
+ * there's also no jmp_buf/register-flush step left to do - that trick
+ * only ever existed to force register-resident pointers onto the stack
+ * for conservative scanning, and a Val written by your interpreter is
+ * already sitting in memory, not transiently in a register.
+ */
+void Marker_markValStacks(Heap *heap, Stack *stack) {
+    MarkValStackContext ctx = {heap, stack};
+    MutatorSync_ForEachThread(Marker_visitThreadValStack, &ctx);
 }
 
 void Marker_markModules(Heap *heap, Stack *stack) {
@@ -122,7 +149,7 @@ void Marker_markModules(Heap *heap, Stack *stack) {
 
 void Marker_MarkRoots(Heap *heap, Stack *stack) {
 
-    Marker_markProgramStack(heap, stack);
+    Marker_markValStacks(heap, stack);
 
     Marker_markModules(heap, stack);
 

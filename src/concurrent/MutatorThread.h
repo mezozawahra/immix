@@ -2,32 +2,31 @@
 #define IMMIX_MUTATOR_THREAD_H
 
 #include "../GCTypes.h"
-#include "../Allocator.h"
+#include "../ThreadLocalAllocator.h"
+#include "ValStack.h"
 
 /**
- * One of these exists per registered mutator (OS) thread. It's a plain C
- * struct so both the C allocator/marker code and the C++ synchronization
- * code can read/write its fields directly without crossing a function-call
- * boundary for the hot fields (`allocator`).
+ * One of these exists per registered mutator (OS) thread.
  */
 typedef struct MutatorThread {
     // This thread's own thread-local bump allocator. Never touched by any
     // other thread, never locked.
-    Allocator *allocator;
+    ThreadLocalAllocator *allocator;
 
-    // The highest address of this thread's native stack, registered once
-    // at thread start (mirrors what `__stack_bottom` used to be for the
-    // single, implicit main thread).
-    word_t **stackBottom;
+    // Base address of this thread's Val stack (a Val[], not the native
+    // call stack). Registered once at thread start and never moves.
+    Val *stackBottom;
 
-    // A snapshot of this thread's own stack pointer, taken at the moment
-    // it parked at a safepoint. Only valid while `parked` is true. The
-    // collector scans from here up to `stackBottom` instead of from a live
-    // register snapshot, since this thread isn't running while parked.
-    word_t *parkedStackTop;
+    // How many Val entries were live on this thread's stack the moment it
+    // last hit a safepoint - recorded via ValStack_CurrentSize() by every
+    // thread on itself, including the collector (it records its own right
+    // before marking begins, the same way a parking thread does - there's
+    // no special case for "the collector's live stack" anymore).
+    // Combined with stackBottom: loop stackBottom[0 .. parkedStackSize).
+    size_t parkedStackSize;
 
-    // True while this thread is blocked inside MutatorSync_Poll, waiting
-    // for the active collection to finish.
+    // True only while this thread is actually blocked inside
+    // MutatorSync_Poll, waiting for someone else's collection to finish.
     bool parked;
 } MutatorThread;
 
