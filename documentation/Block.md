@@ -1,54 +1,80 @@
 # `Block.h` / `Block.c`
 
 This is the other half of the overflow/allocation story: where the holes
-that `Allocator_nextLineRecycled` later walks actually get built. It only
-ever runs as part of `Heap_Recycle`, right after a full mark phase — i.e.
-it's a sweep, one block at a time, over the *entire* small heap.
+that `ThreadLocalAllocator_nextLineRecycled` later walks actually get
+built. It only ever runs as part of `Heap_Recycle`, right after a full
+mark phase — i.e. it's a sweep, one block at a time, over the *entire*
+small heap, and (post-multithreading) it only ever runs while every
+mutator thread is parked (see [Heap.md](Heap.md)'s `Heap_Collect`/
+`Heap_Recycle`), so nothing in here needs its own locking around the
+per-line bookkeeping it mutates directly.
+
+## What changed from the single-mutator version
+
+`Block_Recycle` used to take an `Allocator *` and write straight into its
+`freeBlocks`/`recycledBlocks` lists and counters. Now that those lists
+live behind the shared, locked
+[`GlobalBlockAllocator`](concurrent/GlobalBlockAllocator.md) (since
+multiple mutator threads each have their own
+[`ThreadLocalAllocator`](ThreadLocalAllocator.md) pulling from one shared
+pool), `Block_Recycle` takes a `GlobalBlockAllocator *` instead and
+reports results through its locked API — `GlobalBlockAllocator_AddFreeBlock`,
+`GlobalBlockAllocator_AddRecycledBlock`, `GlobalBlockAllocator_AddFreeMemory` —
+rather than touching any list field directly. The actual per-line
+algorithm (deciding which lines are holes, coalescing runs, building the
+in-block free-line list) is **byte-for-byte unchanged**; only where the
+results get reported changed.
+
+```c
+void Block_Recycle(GlobalBlockAllocator *globalAllocator, BlockHeader *blockHeader);
+```
 
 ## `Block_Recycle` — the per-block decision tree
 
 ```c
-void Block_Recycle(Allocator *allocator, BlockHeader *blockHeader) {
+void Block_Recycle(GlobalBlockAllocator *globalAllocator, BlockHeader *blockHeader) {
     if (!Block_IsMarked(blockHeader)) {
-        Block_recycleUnmarkedBlock(allocator, blockHeader);
-        allocator->freeBlockCount++;
-        allocator->freeMemoryAfterCollection += BLOCK_TOTAL_SIZE;
-    } else {
-        Block_Unmark(blockHeader);
-        /* ...line-by-line walk, see below... */
+        Block_recycleUnmarkedBlock(globalAllocator, blockHeader);
+        GlobalBlockAllocator_AddFreeMemory(globalAllocator, BLOCK_TOTAL_SIZE);
+        return;
     }
+
+    assert(Block_IsMarked(blockHeader));
+    Block_Unmark(blockHeader);
+    /* ...line-by-line walk, see below... */
 }
 ```
 
-The very first check is the block-level summary mark
+The very first check is still the block-level summary mark
 (`BlockHeader.header.mark`, set by `Object_Mark` whenever *any* object
-inside this block was found reachable). If it's still unset, nothing in
-this block survived — the entire block can be discarded in one shot
-without looking at a single line:
+inside this block was found reachable — see
+[headers/ObjectHeader.md](headers/ObjectHeader.md)). If it's still unset,
+nothing in this block survived — the entire block can be discarded in one
+shot without looking at a single line:
 
 ```c
-INLINE void Block_recycleUnmarkedBlock(Allocator *allocator, BlockHeader *blockHeader) {
-    memset(blockHeader, 0, LINE_SIZE);          // clear the metadata region
-    BlockList_AddLast(&allocator->freeBlocks, blockHeader);
+INLINE void Block_recycleUnmarkedBlock(GlobalBlockAllocator *globalAllocator,
+                                       BlockHeader *blockHeader) {
+    memset(blockHeader, 0, LINE_SIZE);
+    GlobalBlockAllocator_AddFreeBlock(globalAllocator, blockHeader);
     Block_SetFlag(blockHeader, block_free);
 }
 ```
 
-(`memset(..., LINE_SIZE)` clears exactly the metadata region —
-`BLOCK_METADATA_ALIGNED_SIZE` is 256 bytes, one `LINE_SIZE` — wiping
-`mark`/`flags`/`first`/`nextBlock` and all 127 line headers back to zero
-in one call, far cheaper than the line-by-line path below.)
+(`memset(..., LINE_SIZE)` still clears exactly the 256-byte metadata
+region in one call, same as before — wiping `mark`/`flags`/`first`/
+`nextBlock` and all 127 `LineHeader` bytes to zero.
+`GlobalBlockAllocator_AddFreeBlock` replaces what used to be a direct
+`BlockList_AddLast(&allocator->freeBlocks, blockHeader)` plus a separate
+`allocator->freeBlockCount++` — the global allocator's version does both
+atomically under its lock.)
 
-## If the block *is* marked: line-by-line
-
-If `BlockHeader.header.mark` was set, somewhere in this block at least one
-object survived — but most lines in it might still be dead. This is where
-Immix's actual per-line (not per-object, not per-block) recycling
-granularity shows up:
+## If the block *is* marked: line-by-line, with batched reporting
 
 ```c
 int16_t lineIndex = 0;
-int lastRecyclable = NO_RECYCLABLE_LINE;     // -1
+int lastRecyclable = NO_RECYCLABLE_LINE;
+size_t freedInBlock = 0;
 
 while (lineIndex < LINE_COUNT) {
     LineHeader *lineHeader = Block_GetLineHeader(blockHeader, lineIndex);
@@ -61,13 +87,31 @@ while (lineIndex < LINE_COUNT) {
         ...
     }
 }
+
+if (freedInBlock > 0) {
+    GlobalBlockAllocator_AddFreeMemory(globalAllocator, freedInBlock);
+}
 ```
 
-**Marked lines** (`Block_recycleMarkedLine`) get unmarked, and — only if
-the line actually contains an object header — every object in that line
-gets resolved from ambiguous to definite: `marked → allocated` (it
-survived, keep it as live data) or `allocated → free` (it was never
-visited this trace, it's garbage):
+This is the one deliberate change beyond "swap direct field writes for
+locked calls." In the original, every individual unmarked line
+immediately did `allocator->freeMemoryAfterCollection += LINE_SIZE` —
+a direct field write, free because there was only one allocator and one
+thread. Doing that now would mean acquiring `GlobalBlockAllocator`'s lock
+once *per recycled line*, for the entire small heap, on every collection —
+needless contention for a counter that nothing reads until the whole
+sweep is done. Instead, `freedInBlock` accumulates locally across the
+*entire* line walk for this one block, and gets reported in a single
+`GlobalBlockAllocator_AddFreeMemory` call at the very end — one lock/unlock
+per block instead of one per recycled line. `Block_recycleUnmarkedBlock`'s
+single `BLOCK_TOTAL_SIZE` report (above) needs no such batching since it's
+already exactly one call per block.
+
+**Marked lines** (`Block_recycleMarkedLine`) — entirely unchanged from the
+single-mutator version, since this part never touched the allocator at
+all: unmark the line, and — only if it actually contains an object header —
+resolve every object in it from ambiguous to definite, `marked → allocated`
+(survived) or `allocated → free` (never visited, garbage):
 
 ```c
 INLINE void Block_recycleMarkedLine(BlockHeader *blockHeader, LineHeader *lineHeader, int lineIndex) {
@@ -87,46 +131,34 @@ INLINE void Block_recycleMarkedLine(BlockHeader *blockHeader, LineHeader *lineHe
 }
 ```
 
-Notice this per-object walk only happens for lines that are *marked* — a
-line that's entirely garbage never gets this treatment at all, because the
-whole line becomes a hole regardless of what dead bytes happen to still say
-in it (see the `else` branch below). This is the concrete payoff of
-line-granularity tracking: per-object bookkeeping only happens on the
-"boundary" lines that mix live and dead objects, not across the whole
-heap.
+This per-object walk only ever runs for lines that mix live and dead
+objects — a wholly-garbage line never gets this treatment, it becomes a
+hole regardless of what dead bytes are sitting in it (next section). This
+is still the concrete payoff of line-granularity tracking: per-object
+bookkeeping is confined to the "boundary" lines, not the whole heap.
 
-**Unmarked lines** are where holes get built and coalesced:
+**Unmarked lines** — also unchanged algorithmically (greedy coalescing of
+consecutive unmarked lines into one hole, recorded via the in-place
+`FreeLineHeader` linked list — see
+[headers/LineHeader.md](headers/LineHeader.md)) — except every line's
+`LINE_SIZE` contribution now adds to the local `freedInBlock` accumulator
+instead of writing straight into `allocator->freeMemoryAfterCollection`:
 
 ```c
-if (lastRecyclable == NO_RECYCLABLE_LINE) {
-    blockHeader->header.first = lineIndex;          // first hole found -> head of the list
-} else {
-    Block_GetFreeLineHeader(blockHeader, lastRecyclable)->next = lineIndex;  // chain previous hole to this one
-}
 lastRecyclable = lineIndex;
 lineIndex++;
 Line_SetEmpty(lineHeader);
-allocator->freeMemoryAfterCollection += LINE_SIZE;
-
+freedInBlock += LINE_SIZE;
 uint8_t size = 1;
 while (lineIndex < LINE_COUNT &&
        !Line_IsMarked(lineHeader = Block_GetLineHeader(blockHeader, lineIndex))) {
     size++;
     lineIndex++;
     Line_SetEmpty(lineHeader);
-    allocator->freeMemoryAfterCollection += LINE_SIZE;
+    freedInBlock += LINE_SIZE;
 }
 Block_GetFreeLineHeader(blockHeader, lastRecyclable)->size = size;
 ```
-
-Walk forward greedily while lines stay unmarked, counting how many
-consecutive lines this hole spans (`size`), clearing each to
-`line_empty` as it goes, then write that count into the
-`FreeLineHeader` sitting at the *start* of the hole. `lastRecyclable`
-tracks the previous hole so its `.next` can be wired to this new one —
-building the same in-place linked list that `Allocator_nextLineRecycled`
-walks later, one hole at a time, coalesced into the longest contiguous
-runs possible.
 
 ## After the full line walk: was there anything to give back?
 
@@ -136,20 +168,20 @@ if (lastRecyclable == NO_RECYCLABLE_LINE) {
 } else {
     Block_GetFreeLineHeader(blockHeader, lastRecyclable)->next = LAST_HOLE;
     Block_SetFlag(blockHeader, block_recyclable);
-    BlockList_AddLast(&allocator->recycledBlocks, blockHeader);
-    allocator->recycledBlockCount++;
+    GlobalBlockAllocator_AddRecycledBlock(globalAllocator, blockHeader);
+
+    assert(blockHeader->header.first != NO_RECYCLABLE_LINE);
 }
 ```
 
-If every single line in the block turned out to be marked (no holes were
-ever started), `lastRecyclable` never moved off `NO_RECYCLABLE_LINE` — the
-block is `block_unavailable`: completely full of survivors, nothing to
-hand the allocator, but not free either. It just sits there, neither in
-`freeBlocks` nor `recycledBlocks`, until the *next* collection might open
-up some space in it. Otherwise, terminate the hole list with `LAST_HOLE`,
-flag the block recyclable, and append it to `recycledBlocks`.
+Same logic as before: if every line in the block turned out marked
+(`lastRecyclable` never moved), the block is `block_unavailable` —
+completely full of survivors, given to no one, until the *next* collection
+might open up space. Otherwise, terminate the hole list with `LAST_HOLE`,
+flag the block recyclable, and report it via
+`GlobalBlockAllocator_AddRecycledBlock` (replacing the old direct
+`BlockList_AddLast(&allocator->recycledBlocks, blockHeader)` +
+`allocator->recycledBlockCount++` pair).
 
-`allocator->freeMemoryAfterCollection` — accumulated in both branches
-above (whole blocks and individual holes) — is exactly the number
-`Allocator_ShouldGrow` checks against the heap's total size (see
-[Allocator.md](Allocator.md)).
+`Block_Print` is unchanged — it only reads block/line state for debugging
+output, never touches the allocator.
