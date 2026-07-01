@@ -14,16 +14,16 @@ static INLINE Object *Line_GetFirstObject(LineHeader *lineHeader) {
         Block_GetLineIndexFromLineHeader(blockHeader, lineHeader);
 
     return (Object *)Block_GetLineWord(blockHeader, lineIndex,
-                                       offset / WORD_SIZE);
+                                       offset / OBJ_ALIGN);
 }
 
-static INLINE void Line_Update(BlockHeader *blockHeader, word_t *objectStart) {
+static INLINE void Line_Update(BlockHeader *blockHeader, uintptr_t *objectStart) {
 
     int lineIndex = Block_GetLineIndexFromWord(blockHeader, objectStart);
     LineHeader *lineHeader = Block_GetLineHeader(blockHeader, lineIndex);
 
     if (!Line_ContainsObject(lineHeader)) {
-        uint8_t offset = (uint8_t)((word_t)objectStart & LINE_SIZE_MASK);
+        uint8_t offset = (uint8_t)((uintptr_t)objectStart & LINE_SIZE_MASK);
 
         Line_SetOffset(lineHeader, offset);
     }

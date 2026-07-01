@@ -13,7 +13,7 @@ extern Heap *heap;
 extern Stack *stack;
 
 extern bool overflow;
-extern word_t *currentOverflowAddress;
+extern uintptr_t *currentOverflowAddress;
 
 // Each OS thread's own handle into the GC, set once by
 // ImmixGC_RegisterThread and read by every allocation entry point in

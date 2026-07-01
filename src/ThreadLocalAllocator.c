@@ -42,9 +42,9 @@ bool ThreadLocalAllocator_ShouldGrow(ThreadLocalAllocator *allocator) {
     return GlobalBlockAllocator_ShouldGrow(allocator->globalAllocator);
 }
 
-word_t *ThreadLocalAllocator_overflowAllocation(ThreadLocalAllocator *allocator, size_t size) {
-    word_t *start = allocator->largeCursor;
-    word_t *end = (word_t *)((uint8_t *)start + size);
+uintptr_t *ThreadLocalAllocator_overflowAllocation(ThreadLocalAllocator *allocator, size_t size) {
+    uintptr_t *start = allocator->largeCursor;
+    uintptr_t *end = (uintptr_t *)((uint8_t *)start + size);
 
     if (end > allocator->largeLimit) {
         BlockHeader *block =
@@ -61,7 +61,7 @@ word_t *ThreadLocalAllocator_overflowAllocation(ThreadLocalAllocator *allocator,
     if (end == allocator->largeLimit) {
         memset(start, 0, size);
     } else {
-        memset(start, 0, size + WORD_SIZE);
+        memset(start, 0, size + OBJ_ALIGN);
     }
 
     allocator->largeCursor = end;
@@ -69,9 +69,9 @@ word_t *ThreadLocalAllocator_overflowAllocation(ThreadLocalAllocator *allocator,
     return start;
 }
 
-INLINE word_t *ThreadLocalAllocator_Alloc(ThreadLocalAllocator *allocator, size_t size) {
-    word_t *start = allocator->cursor;
-    word_t *end = (word_t *)((uint8_t *)start + size);
+INLINE uintptr_t *ThreadLocalAllocator_Alloc(ThreadLocalAllocator *allocator, size_t size) {
+    uintptr_t *start = allocator->cursor;
+    uintptr_t *end = (uintptr_t *)((uint8_t *)start + size);
 
     if (end > allocator->limit) {
         if (size > LINE_SIZE) {
@@ -87,7 +87,7 @@ INLINE word_t *ThreadLocalAllocator_Alloc(ThreadLocalAllocator *allocator, size_
     if (end == allocator->limit) {
         memset(start, 0, size);
     } else {
-        memset(start, 0, size + WORD_SIZE);
+        memset(start, 0, size + OBJ_ALIGN);
     }
 
     allocator->cursor = end;
@@ -96,7 +96,7 @@ INLINE word_t *ThreadLocalAllocator_Alloc(ThreadLocalAllocator *allocator, size_
 }
 
 bool ThreadLocalAllocator_nextLineRecycled(ThreadLocalAllocator *allocator) {
-    BlockHeader *block = Block_GetBlockHeader(allocator->cursor - WORD_SIZE);
+    BlockHeader *block = Block_GetBlockHeader(allocator->cursor - OBJ_ALIGN);
     assert(Block_IsRecyclable(block));
 
     int16_t lineIndex = block->header.first;
@@ -105,12 +105,12 @@ bool ThreadLocalAllocator_nextLineRecycled(ThreadLocalAllocator *allocator) {
         return ThreadLocalAllocator_getNextLine(allocator);
     }
 
-    word_t *line = Block_GetLineAddress(block, lineIndex);
+    uintptr_t *line = Block_GetLineAddress(block, lineIndex);
     allocator->cursor = line;
     FreeLineHeader *lineHeader = (FreeLineHeader *)line;
     block->header.first = lineHeader->next;
     uint16_t size = lineHeader->size;
-    allocator->limit = line + (size * WORDS_IN_LINE);
+    allocator->limit = line + (size * SLOTS_IN_LINE);
     return true;
 }
 
@@ -124,20 +124,20 @@ void ThreadLocalAllocator_firstLineNewBlock(ThreadLocalAllocator *allocator, Blo
         assert(Block_IsRecyclable(block));
         int16_t lineIndex = block->header.first;
         assert(lineIndex < LINE_COUNT);
-        word_t *line = Block_GetLineAddress(block, lineIndex);
+        uintptr_t *line = Block_GetLineAddress(block, lineIndex);
 
         allocator->cursor = line;
         FreeLineHeader *lineHeader = (FreeLineHeader *)line;
         block->header.first = lineHeader->next;
         uint16_t size = lineHeader->size;
         assert(size > 0);
-        allocator->limit = line + (size * WORDS_IN_LINE);
+        allocator->limit = line + (size * SLOTS_IN_LINE);
     }
 }
 
 bool ThreadLocalAllocator_getNextLine(ThreadLocalAllocator *allocator) {
     if (allocator->cursor == NULL ||
-        Block_IsFree(Block_GetBlockHeader(allocator->cursor - WORD_SIZE))) {
+        Block_IsFree(Block_GetBlockHeader(allocator->cursor - OBJ_ALIGN))) {
         BlockHeader *block = ThreadLocalAllocator_getNextBlock(allocator);
         if (block == NULL) {
             return false;

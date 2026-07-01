@@ -22,9 +22,9 @@ INLINE void Block_recycleMarkedLine(BlockHeader *blockHeader,
     Line_Unmark(lineHeader);
     if (Line_ContainsObject(lineHeader)) {
         Object *object = Line_GetFirstObject(lineHeader);
-        word_t *lineEnd =
-            Block_GetLineAddress(blockHeader, lineIndex) + WORDS_IN_LINE;
-        while (object != NULL && (word_t *)object < lineEnd) {
+        uintptr_t *lineEnd =
+            Block_GetLineAddress(blockHeader, lineIndex) + SLOTS_IN_LINE;
+        while (object != NULL && (uintptr_t *)object < lineEnd) {
             ObjectHeader *objectHeader = &object->header;
             if (Object_IsMarked(objectHeader)) {
                 Object_SetAllocated(objectHeader);

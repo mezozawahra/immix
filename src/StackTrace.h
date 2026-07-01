@@ -11,7 +11,7 @@ void StackTrace_PrintStackTrace() {
     unw_init_local(&cursor, &context);
 
     while (unw_step(&cursor) > 0) {
-        unw_word_t offset, pc;
+        unw_uintptr_t offset, pc;
         unw_get_reg(&cursor, UNW_REG_IP, &pc);
         if (pc == 0) {
             break;

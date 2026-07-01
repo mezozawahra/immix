@@ -12,18 +12,18 @@ typedef struct {
     GlobalBlockAllocator *globalAllocator;
 
     BlockHeader *block;
-    word_t *cursor;
-    word_t *limit;
+    uintptr_t *cursor;
+    uintptr_t *limit;
 
     BlockHeader *largeBlock;
-    word_t *largeCursor;
-    word_t *largeLimit;
+    uintptr_t *largeCursor;
+    uintptr_t *largeLimit;
 } ThreadLocalAllocator;
 
 ThreadLocalAllocator *ThreadLocalAllocator_Create(GlobalBlockAllocator *globalAllocator);
 bool ThreadLocalAllocator_CanInitCursors(ThreadLocalAllocator *allocator);
 void ThreadLocalAllocator_InitCursors(ThreadLocalAllocator *allocator);
-word_t *ThreadLocalAllocator_Alloc(ThreadLocalAllocator *allocator, size_t size);
+uintptr_t *ThreadLocalAllocator_Alloc(ThreadLocalAllocator *allocator, size_t size);
 
 bool ThreadLocalAllocator_ShouldGrow(ThreadLocalAllocator *allocator);
 

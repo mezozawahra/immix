@@ -8,17 +8,17 @@
 
 typedef struct {
     size_t size;
-    word_t *words;
+    bitmap_word_t *data;
     ubyte_t *offset;
 } Bitmap;
 
-#define BITS_PER_WORD (sizeof(word_t) * CHAR_BIT)
-#define WORD_OFFSET(b) (b / BITS_PER_WORD)
-#define BIT_OFFSET(b) (b % BITS_PER_WORD)
+#define BITS_PER_BITMAP_WORD (sizeof(bitmap_word_t) * CHAR_BIT)
+#define WORD_OFFSET(b) (b / BITS_PER_BITMAP_WORD)
+#define BIT_OFFSET(b) (b % BITS_PER_BITMAP_WORD)
 
 #define BITMAP_GRANULARITY MIN_BLOCK_SIZE
 
-Bitmap *Bitmap_Alloc(size_t size, word_t *offset);
+Bitmap *Bitmap_Alloc(size_t size, void *offset);
 
 void Bitmap_SetBit(Bitmap *bitmap, ubyte_t *addr);
 

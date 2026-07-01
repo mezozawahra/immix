@@ -4,15 +4,15 @@
 #include "../Log.h"
 #include "../headers/BlockHeader.h"
 
-int32_t _getBlockIndex(word_t *heapStart, BlockHeader *blockHeader) {
-    return (uint32_t)((word_t *)blockHeader - heapStart) / WORDS_IN_BLOCK;
+int32_t _getBlockIndex(uintptr_t *heapStart, BlockHeader *blockHeader) {
+    return (uint32_t)((uintptr_t *)blockHeader - heapStart) / SLOTS_IN_BLOCK;
 }
 
-BlockHeader *_getBlockFromIndex(word_t *heapStart, int32_t index) {
-    return (BlockHeader *)(heapStart + (index * WORDS_IN_BLOCK));
+BlockHeader *_getBlockFromIndex(uintptr_t *heapStart, int32_t index) {
+    return (BlockHeader *)(heapStart + (index * SLOTS_IN_BLOCK));
 }
 
-BlockHeader *_getNextBlock(word_t *heapStart, BlockHeader *header) {
+BlockHeader *_getNextBlock(uintptr_t *heapStart, BlockHeader *header) {
     int32_t nextBlockId = header->header.nextBlock;
     if (nextBlockId == LAST_BLOCK) {
         return NULL;
@@ -22,7 +22,7 @@ BlockHeader *_getNextBlock(word_t *heapStart, BlockHeader *header) {
     return _getBlockFromIndex(heapStart, nextBlockId);
 }
 
-void BlockList_Init(BlockList *blockList, word_t *heapStart) {
+void BlockList_Init(BlockList *blockList, uintptr_t *heapStart) {
     blockList->heapStart = heapStart;
     blockList->first = NULL;
     blockList->last = NULL;

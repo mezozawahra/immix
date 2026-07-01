@@ -11,7 +11,7 @@
 #include "concurrent/MutatorSync.h"
 #include "concurrent/ValStack.h"
 
-extern word_t *__modules;
+extern uintptr_t *__modules;
 extern int __modules_size;
 
 #define LAST_FIELD_OFFSET -1
@@ -35,7 +35,7 @@ void Marker_markObject(Heap *heap, Stack *stack, Object *object) {
  * backward/forward line search are dead weight and can be deleted; tell
  * me and I'll take them out together.
  */
-void Marker_markConservative(Heap *heap, Stack *stack, word_t *address) {
+void Marker_markConservative(Heap *heap, Stack *stack, uintptr_t *address) {
     assert(Heap_IsWordInHeap(heap, address));
     Object *object = NULL;
     if (Heap_IsWordInSmallHeap(heap, address)) {
@@ -57,10 +57,10 @@ void Marker_Mark(Heap *heap, Stack *stack) {
         ObjectHeader *objectHeader = &object->header;
         if (Object_IsObjectArray(objectHeader)) {
             size_t size =
-                Object_Size(&object->header) - OBJECT_HEADER_SIZE - WORD_SIZE;
-            size_t nbWords = size / WORD_SIZE;
+                Object_Size(&object->header) - OBJECT_HEADER_SIZE - OBJ_ALIGN;
+            size_t nbWords = size / OBJ_ALIGN;
             for (int i = 0; i < nbWords; i++) {
-                word_t *field = object->fields[i];
+                uintptr_t *field = object->fields[i];
                 Object *fieldObject = Object_FromMutatorAddress(field);
                 if (heap_isObjectInHeap(heap, fieldObject) &&
                     !Object_IsMarked(&fieldObject->header)) {
@@ -71,7 +71,7 @@ void Marker_Mark(Heap *heap, Stack *stack) {
             int64_t *ptr_map = object->rtti->refMapStruct;
             int i = 0;
             while (ptr_map[i] != LAST_FIELD_OFFSET) {
-                word_t *field = object->fields[ptr_map[i]];
+                uintptr_t *field = object->fields[ptr_map[i]];
                 Object *fieldObject = Object_FromMutatorAddress(field);
                 if (heap_isObjectInHeap(heap, fieldObject) &&
                     !Object_IsMarked(&fieldObject->header)) {
@@ -96,7 +96,7 @@ void Marker_Mark(Heap *heap, Stack *stack) {
 static void Marker_markValStack(Heap *heap, Stack *stack, Val *stackBottom,
                                 size_t size) {
     for (size_t i = 0; i < size; i++) {
-        word_t *ref;
+        uintptr_t *ref;
         if (ValStack_IsReference(&stackBottom[i], &ref) &&
             Heap_IsWordInHeap(heap, ref)) {
             Object *object = Object_FromMutatorAddress(ref);
@@ -135,7 +135,7 @@ void Marker_markValStacks(Heap *heap, Stack *stack) {
 }
 
 void Marker_markModules(Heap *heap, Stack *stack) {
-    word_t **modules = &__modules;
+    uintptr_t **modules = &__modules;
     int nb_modules = __modules_size;
 
     for (int i = 0; i < nb_modules; i++) {

@@ -33,7 +33,7 @@ void ImmixGC_UnregisterThread() {
 
 void *scalanative_alloc(void *info, size_t size, int isObjectArray) {
     MutatorSync_Poll(currentMutatorThread);
-    size = MathUtils_RoundToNextMultiple(size, WORD_SIZE);
+    size = MathUtils_RoundToNextMultiple(size, OBJ_ALIGN);
 
     void **alloc = (void **)Heap_Alloc(heap, size, isObjectArray ? true : false,
                                        currentMutatorThread);
@@ -43,7 +43,7 @@ void *scalanative_alloc(void *info, size_t size, int isObjectArray) {
 
 void *scalanative_alloc_small(void *info, size_t size) {
     MutatorSync_Poll(currentMutatorThread);
-    size = MathUtils_RoundToNextMultiple(size, WORD_SIZE);
+    size = MathUtils_RoundToNextMultiple(size, OBJ_ALIGN);
 
     void **alloc =
         (void **)Heap_AllocSmall(heap, size, false, currentMutatorThread);
@@ -53,7 +53,7 @@ void *scalanative_alloc_small(void *info, size_t size) {
 
 void *scalanative_alloc_large(void *info, size_t size) {
     MutatorSync_Poll(currentMutatorThread);
-    size = MathUtils_RoundToNextMultiple(size, WORD_SIZE);
+    size = MathUtils_RoundToNextMultiple(size, OBJ_ALIGN);
 
     void **alloc =
         (void **)Heap_AllocLarge(heap, size, false, currentMutatorThread);

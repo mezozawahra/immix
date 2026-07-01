@@ -17,7 +17,7 @@ extern "C" {
  */
 typedef struct GlobalBlockAllocator GlobalBlockAllocator;
 
-GlobalBlockAllocator *GlobalBlockAllocator_Create(word_t *heapStart,
+GlobalBlockAllocator *GlobalBlockAllocator_Create(uintptr_t *heapStart,
                                                   uint64_t blockCount);
 
 /** Recycled blocks first, then free blocks. NULL if both are empty. */

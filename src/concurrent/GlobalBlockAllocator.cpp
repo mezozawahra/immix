@@ -12,7 +12,7 @@
 struct GlobalBlockAllocator {
     std::mutex mutex;
 
-    word_t *heapStart;
+    uintptr_t *heapStart;
     uint64_t blockCount;
 
     BlockList freeBlocks;
@@ -23,7 +23,7 @@ struct GlobalBlockAllocator {
     size_t freeMemoryAfterCollection;
 };
 
-extern "C" GlobalBlockAllocator *GlobalBlockAllocator_Create(word_t *heapStart,
+extern "C" GlobalBlockAllocator *GlobalBlockAllocator_Create(uintptr_t *heapStart,
                                                               uint64_t blockCount) {
     auto *allocator = new GlobalBlockAllocator();
     allocator->heapStart = heapStart;
@@ -36,7 +36,7 @@ extern "C" GlobalBlockAllocator *GlobalBlockAllocator_Create(word_t *heapStart,
     // Allocator_Create used to do directly.
     allocator->freeBlocks.first = (BlockHeader *)heapStart;
     BlockHeader *lastBlockHeader =
-        (BlockHeader *)(heapStart + ((blockCount - 1) * WORDS_IN_BLOCK));
+        (BlockHeader *)(heapStart + ((blockCount - 1) * SLOTS_IN_BLOCK));
     allocator->freeBlocks.last = lastBlockHeader;
     lastBlockHeader->header.nextBlock = LAST_BLOCK;
 

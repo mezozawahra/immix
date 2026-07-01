@@ -7,7 +7,7 @@ struct GlobalLargeAllocator {
     LargeAllocator *largeAllocator;
 };
 
-extern "C" GlobalLargeAllocator *GlobalLargeAllocator_Create(word_t *offset,
+extern "C" GlobalLargeAllocator *GlobalLargeAllocator_Create(uintptr_t *offset,
                                                               size_t size) {
     auto *allocator = new GlobalLargeAllocator();
     allocator->largeAllocator = LargeAllocator_Create(offset, size);
@@ -26,7 +26,7 @@ extern "C" void GlobalLargeAllocator_Sweep(GlobalLargeAllocator *allocator) {
 }
 
 extern "C" void GlobalLargeAllocator_Grow(GlobalLargeAllocator *allocator,
-                                          word_t *chunkStart,
+                                          void *chunkStart,
                                           size_t incrementBytes) {
     std::lock_guard<std::mutex> lock(allocator->mutex);
     allocator->largeAllocator->size += incrementBytes;

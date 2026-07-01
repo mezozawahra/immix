@@ -49,20 +49,20 @@ static inline void Block_Mark(BlockHeader *blockHeader) {
     blockHeader->header.mark = 1;
 }
 
-static inline BlockHeader *Block_GetBlockHeader(word_t *word) {
-    return (BlockHeader *)((word_t)word & BLOCK_SIZE_IN_BYTES_INVERSE_MASK);
+static inline BlockHeader *Block_GetBlockHeader(void *addr) {
+    return (BlockHeader *)((uintptr_t)addr & BLOCK_SIZE_IN_BYTES_INVERSE_MASK);
 }
 
-static inline word_t *Block_GetLineAddress(BlockHeader *blockHeader,
+static inline uintptr_t *Block_GetLineAddress(BlockHeader *blockHeader,
                                            int lineIndex) {
     assert(lineIndex < LINE_COUNT);
-    return (word_t *)((ubyte_t *)blockHeader + BLOCK_METADATA_ALIGNED_SIZE +
+    return (uintptr_t *)((ubyte_t *)blockHeader + BLOCK_METADATA_ALIGNED_SIZE +
                       (lineIndex * LINE_SIZE));
 }
 
-static inline word_t *Block_GetLineWord(BlockHeader *blockHeader, int lineIndex,
+static inline uintptr_t *Block_GetLineWord(BlockHeader *blockHeader, int lineIndex,
                                         int wordIndex) {
-    assert(wordIndex < WORDS_IN_LINE);
+    assert(wordIndex < SLOTS_IN_LINE);
     return &Block_GetLineAddress(blockHeader, lineIndex)[wordIndex];
 }
 
@@ -73,15 +73,15 @@ static inline FreeLineHeader *Block_GetFreeLineHeader(BlockHeader *blockHeader,
 
 static inline BlockHeader *
 Block_BlockHeaderFromLineHeader(LineHeader *lineHeader) {
-    return Block_GetBlockHeader((word_t *)lineHeader);
+    return Block_GetBlockHeader(lineHeader);
 }
 
-static inline word_t *Block_GetFirstWord(BlockHeader *blockHeader) {
-    return (word_t *)((ubyte_t *)blockHeader + BLOCK_METADATA_ALIGNED_SIZE);
+static inline uintptr_t *Block_GetFirstWord(BlockHeader *blockHeader) {
+    return (uintptr_t *)((ubyte_t *)blockHeader + BLOCK_METADATA_ALIGNED_SIZE);
 }
 
-static inline word_t *Block_GetBlockEnd(BlockHeader *blockHeader) {
-    return Block_GetFirstWord(blockHeader) + (WORDS_IN_LINE * LINE_COUNT);
+static inline uintptr_t *Block_GetBlockEnd(BlockHeader *blockHeader) {
+    return Block_GetFirstWord(blockHeader) + (SLOTS_IN_LINE * LINE_COUNT);
 }
 
 static inline uint32_t
@@ -91,9 +91,9 @@ Block_GetLineIndexFromLineHeader(BlockHeader *blockHeader,
 }
 
 static inline uint32_t Block_GetLineIndexFromWord(BlockHeader *blockHeader,
-                                                  word_t *word) {
-    word_t *firstWord = Block_GetFirstWord(blockHeader);
-    return (uint32_t)((word_t)word - (word_t)firstWord) >> LINE_SIZE_BITS;
+                                                  void *addr) {
+    uintptr_t *firstWord = Block_GetFirstWord(blockHeader);
+    return (uint32_t)((uintptr_t)addr - (uintptr_t)firstWord) >> LINE_SIZE_BITS;
 }
 
 static inline LineHeader *Block_GetLineHeader(BlockHeader *blockHeader,

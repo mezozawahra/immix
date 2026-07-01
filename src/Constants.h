@@ -1,10 +1,10 @@
 #ifndef IMMIX_CONSTANTS_H
 #define IMMIX_CONSTANTS_H
 
-#define WORD_SIZE_BITS 3
-#define WORD_SIZE (1 << WORD_SIZE_BITS)
+#define OBJ_ALIGN_BITS 3
+#define OBJ_ALIGN (1 << OBJ_ALIGN_BITS)
 
-#define WORD_INVERSE_MASK (~((word_t)WORD_SIZE - 1))
+#define OBJ_ALIGN_INVERSE_MASK (~((uintptr_t)OBJ_ALIGN - 1))
 
 #define BLOCK_SIZE_BITS 15
 #define LINE_SIZE_BITS 8
@@ -20,7 +20,7 @@
 #define LINE_SIZE_MASK (LINE_SIZE - 1)
 
 #define OBJECT_HEADER_SIZE 8
-#define WORDS_IN_OBJECT_HEADER (OBJECT_HEADER_SIZE / WORD_SIZE)
+#define OBJECT_HEADER_SLOTS (OBJECT_HEADER_SIZE / OBJ_ALIGN)
 
 #define LINE_COUNT                                                             \
     ((BLOCK_TOTAL_SIZE - BLOCK_METADATA_SIZE) /                                \
@@ -32,8 +32,8 @@
 #define BLOCK_METADATA_ALIGNED_SIZE                                            \
     ((TOTAL_BLOCK_METADATA_SIZE + LINE_SIZE - 1) / LINE_SIZE * LINE_SIZE)
 
-#define WORDS_IN_LINE (LINE_SIZE / WORD_SIZE)
-#define WORDS_IN_BLOCK (BLOCK_TOTAL_SIZE / WORD_SIZE)
+#define SLOTS_IN_LINE (LINE_SIZE / OBJ_ALIGN)
+#define SLOTS_IN_BLOCK (BLOCK_TOTAL_SIZE / OBJ_ALIGN)
 
 #define BLOCK_SIZE_IN_BYTES_MASK (BLOCK_TOTAL_SIZE - 1)
 #define BLOCK_SIZE_IN_BYTES_INVERSE_MASK (~BLOCK_SIZE_IN_BYTES_MASK)

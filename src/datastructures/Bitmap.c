@@ -4,15 +4,15 @@
 #include "../Log.h"
 #include "../utils/MathUtils.h"
 
-Bitmap *Bitmap_Alloc(size_t size, word_t *offset) {
+Bitmap *Bitmap_Alloc(size_t size, void *offset) {
     assert(size % BITMAP_GRANULARITY == 0);
 
     size_t nbBlocks = size / BITMAP_GRANULARITY;
 
-    unsigned long nbWords = MathUtils_DivAndRoundUp(nbBlocks, BITS_PER_WORD);
-    void *words = calloc(nbWords, WORD_SIZE);
+    unsigned long nbWords = MathUtils_DivAndRoundUp(nbBlocks, BITS_PER_BITMAP_WORD);
+    void *words = calloc(nbWords, sizeof(bitmap_word_t));
     Bitmap *bitmap = malloc(sizeof(Bitmap));
-    bitmap->words = words;
+    bitmap->data = words;
     bitmap->size = size;
     bitmap->offset = (ubyte_t *)offset;
     return bitmap;
@@ -26,7 +26,7 @@ void Bitmap_SetBit(Bitmap *bitmap, ubyte_t *addr) {
     assert(addr >= bitmap->offset &&
            addr < bitmap->offset + bitmap->size * MIN_BLOCK_SIZE);
     size_t index = addressToIndex(bitmap->offset, addr);
-    bitmap->words[WORD_OFFSET(index)] |= (1LLU << BIT_OFFSET(index));
+    bitmap->data[WORD_OFFSET(index)] |= (1LLU << BIT_OFFSET(index));
 }
 
 void Bitmap_ClearBit(Bitmap *bitmap, ubyte_t *addr) {
@@ -35,7 +35,7 @@ void Bitmap_ClearBit(Bitmap *bitmap, ubyte_t *addr) {
 
     size_t index = addressToIndex(bitmap->offset, addr);
 
-    bitmap->words[WORD_OFFSET(index)] &= ~(1LLU << BIT_OFFSET(index));
+    bitmap->data[WORD_OFFSET(index)] &= ~(1LLU << BIT_OFFSET(index));
 }
 
 int Bitmap_GetBit(Bitmap *bitmap, ubyte_t *addr) {
@@ -43,8 +43,8 @@ int Bitmap_GetBit(Bitmap *bitmap, ubyte_t *addr) {
            addr < bitmap->offset + bitmap->size * MIN_BLOCK_SIZE);
 
     size_t index = addressToIndex(bitmap->offset, addr);
-    word_t bit =
-        bitmap->words[WORD_OFFSET(index)] & (1LLU << BIT_OFFSET(index));
+    uintptr_t bit =
+        bitmap->data[WORD_OFFSET(index)] & (1LLU << BIT_OFFSET(index));
     return bit != 0;
 }
 
@@ -55,14 +55,14 @@ void Bitmap_Grow(Bitmap *bitmap, size_t increment) {
     size_t nbBlocks = bitmap->size / BITMAP_GRANULARITY;
     size_t nbBlockIncrement = increment / BITMAP_GRANULARITY;
 
-    size_t previousNbWords = MathUtils_DivAndRoundUp(nbBlocks, BITS_PER_WORD);
+    size_t previousNbWords = MathUtils_DivAndRoundUp(nbBlocks, BITS_PER_BITMAP_WORD);
 
     size_t totalNbWords =
-        MathUtils_DivAndRoundUp(nbBlocks + nbBlockIncrement, BITS_PER_WORD);
+        MathUtils_DivAndRoundUp(nbBlocks + nbBlockIncrement, BITS_PER_BITMAP_WORD);
 
-    bitmap->words = realloc(bitmap->words, totalNbWords * WORD_SIZE);
+    bitmap->data = realloc(bitmap->data, totalNbWords * sizeof(bitmap_word_t));
     bitmap->size += increment;
 
-    memset(bitmap->words + previousNbWords, 0,
-           (totalNbWords - previousNbWords) * WORD_SIZE);
+    memset(bitmap->data + previousNbWords, 0,
+           (totalNbWords - previousNbWords) * sizeof(bitmap_word_t));
 }

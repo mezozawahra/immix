@@ -26,7 +26,7 @@ extern "C" {
  * that's possible, since the fix is different (and loses some of the
  * benefit of having precise typing at all).
  */
-bool ValStack_IsReference(const Val *val, word_t **outRef);
+bool ValStack_IsReference(const Val *val, uintptr_t **outRef);
 
 /**
  * Implemented by you. Returns how many Val entries are currently live on

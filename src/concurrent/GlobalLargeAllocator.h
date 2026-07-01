@@ -16,7 +16,7 @@ extern "C" {
  */
 typedef struct GlobalLargeAllocator GlobalLargeAllocator;
 
-GlobalLargeAllocator *GlobalLargeAllocator_Create(word_t *offset, size_t size);
+GlobalLargeAllocator *GlobalLargeAllocator_Create(uintptr_t *offset, size_t size);
 
 Object *GlobalLargeAllocator_GetBlock(GlobalLargeAllocator *allocator,
                                       size_t requestedBlockSize);
@@ -26,7 +26,7 @@ void GlobalLargeAllocator_Sweep(GlobalLargeAllocator *allocator);
 /** Used by Heap_GrowLarge - grows the underlying size, its Bitmap, and
  *  registers the new address range as free chunks, all under one lock. */
 void GlobalLargeAllocator_Grow(GlobalLargeAllocator *allocator,
-                               word_t *chunkStart, size_t incrementBytes);
+                               void *chunkStart, size_t incrementBytes);
 
 /**
  * Read-only access to the underlying `LargeAllocator*`, for

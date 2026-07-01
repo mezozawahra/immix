@@ -30,7 +30,7 @@ typedef struct {
 typedef struct {
     struct {
         int32_t id;
-        word_t *name;
+        uintptr_t *name;
         int8_t kind;
     } rt;
     int64_t size;
@@ -40,14 +40,14 @@ typedef struct {
     } range;
     struct {
         int32_t dyn_method_count;
-        word_t *dyn_method_salt;
-        word_t *dyn_method_keys;
-        word_t *dyn_methods;
+        uintptr_t *dyn_method_salt;
+        uintptr_t *dyn_method_keys;
+        uintptr_t *dyn_methods;
     } dynDispatchTable;
     int64_t *refMapStruct;
 } Rtti;
 
-typedef word_t *Field_t;
+typedef uintptr_t *Field_t;
 
 typedef struct {
     ObjectHeader header;
@@ -92,23 +92,23 @@ static inline size_t Object_Size(ObjectHeader *objectHeader) {
     assert((Object_IsStandardObject(objectHeader) && size < LARGE_BLOCK_SIZE) ||
            !Object_IsStandardObject(objectHeader));
 
-    return size << WORD_SIZE_BITS;
+    return size << OBJ_ALIGN_BITS;
 }
 
 static inline void Object_SetSize(ObjectHeader *objectHeader, size_t size) {
-    uint32_t _size = (uint32_t)(size >> WORD_SIZE_BITS);
+    uint32_t _size = (uint32_t)(size >> OBJ_ALIGN_BITS);
     assert(!Object_IsStandardObject(objectHeader) ||
            (Object_IsStandardObject(objectHeader) && _size > 0 &&
             _size < LARGE_BLOCK_SIZE));
     objectHeader->size = _size;
 }
 
-static inline Object *Object_FromMutatorAddress(word_t *address) {
-    return (Object *)(address - WORDS_IN_OBJECT_HEADER);
+static inline Object *Object_FromMutatorAddress(uintptr_t *address) {
+    return (Object *)(address - OBJECT_HEADER_SLOTS);
 }
 
-static inline word_t *Object_ToMutatorAddress(Object *object) {
-    return (word_t *)&object->rtti;
+static inline uintptr_t *Object_ToMutatorAddress(Object *object) {
+    return (uintptr_t *)&object->rtti;
 }
 
 static inline bool Object_IsObjectArray(ObjectHeader *objectHeader) {

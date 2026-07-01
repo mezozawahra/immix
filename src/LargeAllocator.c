@@ -13,11 +13,11 @@ inline static int LargeAllocator_sizeToLinkedListIndex(size_t size) {
 }
 
 static inline size_t LargeAllocator_getChunkSize(Chunk *chunk) {
-    return (chunk->header.size << WORD_SIZE_BITS);
+    return (chunk->header.size << OBJ_ALIGN_BITS);
 }
 
 static inline void LargeAllocator_setChunkSize(Chunk *chunk, size_t size) {
-    chunk->header.size = (uint32_t)(size >> WORD_SIZE_BITS);
+    chunk->header.size = (uint32_t)(size >> OBJ_ALIGN_BITS);
 }
 
 Chunk *LargeAllocator_chunkAddOffset(Chunk *chunk, size_t words) {
@@ -62,7 +62,7 @@ void LargeAllocator_freeListInit(FreeList *freeList) {
     freeList->last = NULL;
 }
 
-LargeAllocator *LargeAllocator_Create(word_t *offset, size_t size) {
+LargeAllocator *LargeAllocator_Create(uintptr_t *offset, size_t size) {
     LargeAllocator *allocator = malloc(sizeof(LargeAllocator));
     allocator->offset = offset;
     allocator->size = size;
@@ -139,7 +139,7 @@ Object *LargeAllocator_GetBlock(LargeAllocator *allocator,
     Bitmap_SetBit(allocator->bitmap, (ubyte_t *)chunk);
     Object *object = (Object *)chunk;
     Object_SetAllocated(&object->header);
-    memset(Object_ToMutatorAddress(object), 0, actualBlockSize - WORD_SIZE);
+    memset(Object_ToMutatorAddress(object), 0, actualBlockSize - OBJ_ALIGN);
     return object;
 }
 

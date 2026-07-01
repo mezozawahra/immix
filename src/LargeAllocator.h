@@ -22,13 +22,13 @@ typedef struct {
 } FreeList;
 
 typedef struct {
-    word_t *offset;
+    uintptr_t *offset;
     size_t size;
     FreeList freeLists[FREE_LIST_COUNT];
     Bitmap *bitmap;
 } LargeAllocator;
 
-LargeAllocator *LargeAllocator_Create(word_t *offset, size_t largeHeapSize);
+LargeAllocator *LargeAllocator_Create(uintptr_t *offset, size_t largeHeapSize);
 void LargeAllocator_AddChunk(LargeAllocator *allocator, Chunk *chunk,
                              size_t total_block_size);
 Object *LargeAllocator_GetBlock(LargeAllocator *allocator,
