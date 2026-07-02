@@ -4,15 +4,17 @@
 #include "../Log.h"
 #include "../headers/BlockHeader.h"
 
-int32_t _getBlockIndex(uintptr_t *heapStart, BlockHeader *blockHeader) {
-    return (uint32_t)((uintptr_t *)blockHeader - heapStart) / SLOTS_IN_BLOCK;
+// Returns the index of `blockHeader` counting from heapStart in whole blocks.
+static int32_t _getBlockIndex(ubyte_t *heapStart, BlockHeader *blockHeader) {
+    return (int32_t)(((ubyte_t *)blockHeader - heapStart) / BLOCK_TOTAL_SIZE);
 }
 
-BlockHeader *_getBlockFromIndex(uintptr_t *heapStart, int32_t index) {
-    return (BlockHeader *)(heapStart + (index * SLOTS_IN_BLOCK));
+// Returns the BlockHeader* at `index` blocks past heapStart.
+static BlockHeader *_getBlockFromIndex(ubyte_t *heapStart, int32_t index) {
+    return (BlockHeader *)(heapStart + (size_t)index * BLOCK_TOTAL_SIZE);
 }
 
-BlockHeader *_getNextBlock(uintptr_t *heapStart, BlockHeader *header) {
+static BlockHeader *_getNextBlock(ubyte_t *heapStart, BlockHeader *header) {
     int32_t nextBlockId = header->header.nextBlock;
     if (nextBlockId == LAST_BLOCK) {
         return NULL;
@@ -22,8 +24,8 @@ BlockHeader *_getNextBlock(uintptr_t *heapStart, BlockHeader *header) {
     return _getBlockFromIndex(heapStart, nextBlockId);
 }
 
-void BlockList_Init(BlockList *blockList, uintptr_t *heapStart) {
-    blockList->heapStart = heapStart;
+void BlockList_Init(BlockList *blockList, void *heapStart) {
+    blockList->heapStart = (ubyte_t *)heapStart;
     blockList->first = NULL;
     blockList->last = NULL;
 }
@@ -74,7 +76,7 @@ void BlockList_Print(BlockList *blockList) {
     printf("BlockList: ");
     BlockHeader *current = blockList->first;
     while (current != NULL) {
-        printf("[%p %d] -> ", current, current->header.first);
+        printf("[%p %d] -> ", (void *)current, current->header.first);
         current = _getNextBlock(blockList->heapStart, current);
     }
     printf("\n");

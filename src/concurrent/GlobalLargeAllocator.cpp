@@ -7,7 +7,7 @@ struct GlobalLargeAllocator {
     LargeAllocator *largeAllocator;
 };
 
-extern "C" GlobalLargeAllocator *GlobalLargeAllocator_Create(uintptr_t *offset,
+extern "C" GlobalLargeAllocator *GlobalLargeAllocator_Create(void *offset,
                                                               size_t size) {
     auto *allocator = new GlobalLargeAllocator();
     allocator->largeAllocator = LargeAllocator_Create(offset, size);

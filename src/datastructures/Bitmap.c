@@ -43,7 +43,7 @@ int Bitmap_GetBit(Bitmap *bitmap, ubyte_t *addr) {
            addr < bitmap->offset + bitmap->size * MIN_BLOCK_SIZE);
 
     size_t index = addressToIndex(bitmap->offset, addr);
-    uintptr_t bit =
+    bitmap_word_t bit =
         bitmap->data[WORD_OFFSET(index)] & (1LLU << BIT_OFFSET(index));
     return bit != 0;
 }

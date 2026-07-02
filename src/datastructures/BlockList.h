@@ -6,12 +6,12 @@
 #define LAST_BLOCK -1
 
 typedef struct {
-    uintptr_t *heapStart;
+    ubyte_t     *heapStart;  // base address of the small heap, for index arithmetic
     BlockHeader *first;
     BlockHeader *last;
 } BlockList;
 
-void BlockList_Init(BlockList *blockList, uintptr_t *offset);
+void BlockList_Init(BlockList *blockList, void *heapStart);
 void BlockList_Clear(BlockList *blockList);
 bool BlockList_IsEmpty(BlockList *blockList);
 BlockHeader *BlockList_RemoveFirstBlock(BlockList *blockList);

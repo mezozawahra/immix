@@ -16,7 +16,7 @@ extern "C" {
  */
 typedef struct GlobalLargeAllocator GlobalLargeAllocator;
 
-GlobalLargeAllocator *GlobalLargeAllocator_Create(uintptr_t *offset, size_t size);
+GlobalLargeAllocator *GlobalLargeAllocator_Create(void *offset, size_t size);
 
 Object *GlobalLargeAllocator_GetBlock(GlobalLargeAllocator *allocator,
                                       size_t requestedBlockSize);
